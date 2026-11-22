@@ -1,0 +1,6 @@
+# Your own settings (controller IPs): config.example.json is the template
+webui/config.json
+# Console output, and stadiacast's run directories with its logs and request bodies
+logs/
+runtime/
+__pycache__/

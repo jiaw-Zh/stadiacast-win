@@ -1,0 +1,65 @@
+# 网页控制台
+
+本机使用的 stadiacast 管理页面，地址是 http://127.0.0.1:8090/ 。后台服务只用 Python 标准库写成，页面是普通的 HTML 加原生 JS，没有额外的依赖。stadiacast 用的那个 Python 就能运行它。
+
+## 用法
+
+- 双击上一级目录里的 `stadia-console.cmd`，或者运行 `scripts\start-webui.ps1`。控制台会在后台启动，并打开浏览器。
+- 关闭控制台：运行 `scripts\stop-webui.ps1`。stadiacast 不受影响，会继续运行。
+- 第一次运行时，会生成 `config.json`：
+
+  | 字段 | 含义 |
+  |---|---|
+  | `work_dir` | stadiacast 的工作目录，日志写在它下面的 `captures\`。相对路径以项目文件夹为基准 |
+  | `dns_upstream` | 上游 DNS，一般就是路由器 |
+  | `controllers` | 1 到 4 只手柄，每只有名称、IP 和备注 |
+
+  `dns_upstream` 和 `controllers` 可以在页面的"设置"里修改。`work_dir` 只能直接编辑文件。
+
+## 页面上有什么
+
+| 部分 | 内容 |
+|---|---|
+| 顶栏 | stadiacast 是否在运行、版本、运行时长，以及启动和停止按钮 |
+| 手柄卡片 | 是否连上、电量（以及数值来源）、玩家编号、最后通信时间；实时显示按键、摇杆和扳机；震动测试 |
+| 最近事件 | 从 stadiacast 日志里挑出的连接、断开、出错等记录 |
+| 设置 | 上游 DNS 和手柄列表，下次启动 stadiacast 时生效 |
+
+## 为什么要有后台服务
+
+- stadiacast 会拒绝所有带 `Origin` 头的非 GET 请求，而浏览器页面发出的 POST 都带这个头。
+- stadiacast 停止后就没有接口了，页面没法再把它启动起来。
+
+`server.py` 夹在页面和 stadiacast 中间，负责以下几件事：
+
+- **启动**：用 `receiver_args()` 里的参数启动 stadiacast。它是一个独立进程，有自己的隐藏控制台，所以控制台关掉以后它照样运行。
+- **停止**：调用 stadiacast 的 `POST /_shutdown`。
+- **转发实时状态**：只订阅一条 stadiacast 的 `/_events` 推送，再分发给页面，每秒最多 20 次。不反复请求 `/_input`，因为 stadiacast 会把每个请求都记一条日志。
+- **整理日志**：持续读取当次运行的 `server.jsonl`，只保留连接、断开和出错之类的事件，最多 300 条。
+- **补全电量**：手柄刚连上时，从 `/_status` 里取出连接那一刻的电量（见 `docs\battery.md`）。
+- **转发震动请求**：调用 `/_rumble`，并检查参数：强度 0–65535、时长 1–10000 毫秒，而且目标必须是已知的手柄。
+
+## 安全措施
+
+- 只监听 127.0.0.1。
+- `Host` 头必须是 `127.0.0.1:8090` 或 `localhost:8090`，以防 DNS 重绑定攻击。
+- POST 请求必须是 JSON，并且带 `X-Stadia-Console: 1` 请求头。如果带了 `Origin`，必须是控制台自己的地址。其他网站的页面要带上这个自定义请求头，浏览器会先发一次预检请求，而控制台从不批准预检，所以这样的请求发不出来。
+- 页面设置了 CSP，只加载自己的脚本和样式，所有数据都用 `textContent` 渲染。
+
+## 接口
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/state` | 当前状态，内容和推送的一样 |
+| GET | `/api/stream` | 状态推送（server-sent events） |
+| GET | `/api/logs` | 最近 150 条事件，以及日志文件路径 |
+| GET / POST | `/api/config` | 读取或保存设置 |
+| POST | `/api/start`、`/api/stop` | 启动或停止 stadiacast |
+| POST | `/api/rumble` | 发送震动，请求体如 `{"ip": "192.168.1.201", "strength": 40000, "ms": 1000}` |
+| POST | `/api/quit` | 关闭控制台，不影响 stadiacast |
+
+## 已验证
+
+- 两只手柄同时在线时，状态、电量、玩家编号和最近事件都能正确显示。
+- 通过页面停止 stadiacast 再重新启动；关闭控制台后，stadiacast 继续运行。
+- 以下请求会被拒绝：`Host` 不对、缺少专用请求头、`Origin` 来自别的网站、请求体不是 JSON、震动强度超出范围、手柄未知、IP 不是局域网地址、手柄名称重复。

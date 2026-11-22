@@ -1,0 +1,16 @@
+{
+  "work_dir": "runtime",
+  "dns_upstream": "192.168.1.1",
+  "controllers": [
+    {
+      "name": "A",
+      "ip": "192.168.1.201",
+      "note": ""
+    },
+    {
+      "name": "B",
+      "ip": "192.168.1.202",
+      "note": ""
+    }
+  ]
+}
