@@ -27,6 +27,15 @@ stadiacast 的日志在 `runtime\captures\<启动时间>\`，主要有两个文�
 6. **`helper_exited`**
    - DNS 服务退出了。记录里的 `output` 字段会写明是哪个程序占用了 53 端口。
 
+## 看起来像错误、其实正常的事件
+
+- **`display_controller_state_error`，`code` 为 13**（控制台里显示为"手柄状态查询被暂缓"，不标红）
+  - 加密连接建立后，stadiacast 每 1.5 秒询问一次手柄状态，直到手柄回答 OK。
+  - 手柄要等自己的发现流程结束、把连接交给应用之后才会回答。在这之前收到的重复询问，手柄一律回 `INTERNAL`（13），stadiacast 会忽略这个回复，继续询问。
+  - 所以只要之后出现了"就绪"（`display_state ready`）和"手柄信息"（`controller_hardware`），这条记录就可以不管。手柄的交接时间超过 1.5 秒时就会出现，比如 Wi-Fi 信号较弱的时候。
+  - 真正需要处理的是一直没有"就绪"：大约 5 分钟后会出现 `display_rpc_unanswered`。
+  - stadiacast 的 `docs/protocol.md` §5 第 3 步讲了这个过程，测试 `test_get_controller_state_deferred_until_handoff_and_internal_retried` 覆盖的也正是这种情况。
+
 ## 常用命令
 
 ```powershell

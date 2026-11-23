@@ -53,6 +53,9 @@ input, select {
   border-bottom: 1px solid var(--line);
 }
 .receiver { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.lang { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.lang-btn { border-radius: 0; padding: 0.35rem 0.6rem; background: #fff; color: var(--muted); font-size: 0.85rem; }
+.lang-btn[aria-pressed="true"] { background: var(--text); color: #fff; }
 
 .badge {
   display: inline-block;

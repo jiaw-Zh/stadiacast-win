@@ -2,49 +2,15 @@
 
 // Everything the page shows comes from /api/stream (server-sent events) and /api/logs.
 // Actions are POSTs to /api/*, with the header the console server requires.
+// The texts are in i18n.js: t() for the page's own, tx() for the server's messages.
 
-const PHASES = {
-  unknown: ['检测中…', 'wait'],
-  stopped: ['已停止', 'off'],
-  starting: ['启动中…', 'wait'],
-  running: ['运行中', 'on'],
-  stopping: ['停止中…', 'wait'],
-  failed: ['启动失败', 'bad'],
-};
-
-const EVENT_NAMES = {
-  ready: 'stadiacast 已启动',
-  stopped: 'stadiacast 已停止',
-  dns_sink_started: 'DNS 服务已启动',
-  controller_new: '发现新手柄',
-  controller_hardware: '手柄信息',
-  display_state: '连接状态',
-  dtls_connected: '加密连接已建立',
-  dtls_closed_by_peer: '手柄断开了连接',
-  boot_state_reset: '手柄重新开机',
-  game_started: '游戏会话已开始',
-  game_closed: '游戏会话已关闭',
-  game_start_failed: '游戏会话启动失败',
-  gamepad_created: '虚拟手柄已创建',
-  gamepad_failed: '虚拟手柄出错',
-  gamepad_rumble_failed: '震动转发失败',
-  rumble_refresh_failed: '震动保持失败',
-  port_busy: '端口被占用',
-  helper_exited: '辅助进程退出',
-  handler_error: '请求处理出错',
-  tls_alert: '手柄拒绝了证书',
-  rpc_out_failed: '消息发送失败',
-  display_rpc_unanswered: '手柄没有应答',
-  gmsg_unattributed: '无法识别的手柄请求',
-};
-
-const DISPLAY_STATES = {
-  idle: '空闲',
-  'dtls-connected': '加密连接已建立',
-  'get-controller-state-sent': '正在查询手柄状态',
-  'controller-state-received': '已收到手柄状态',
-  ready: '就绪',
-  input: '开始接收输入',
+const PHASE_CLASSES = {
+  unknown: 'wait',
+  stopped: 'off',
+  starting: 'wait',
+  running: 'on',
+  stopping: 'wait',
+  failed: 'bad',
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -53,6 +19,7 @@ let state = null;
 let streamDown = false;
 let lastLogSeq = null;
 let logTimer = null;
+let lastLogs = null; // the last /api/logs document, kept to redraw it in another language
 const cards = new Map(); // controller IP -> card
 
 // --- helpers ---------------------------------------------------------------------------------
@@ -65,7 +32,7 @@ async function post(path, body) {
   });
   let doc = null;
   try { doc = await res.json(); } catch { /* not JSON */ }
-  if (!res.ok) throw new Error((doc && doc.error) || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(tx(doc && doc.error) || `HTTP ${res.status}`);
   return doc;
 }
 
@@ -77,15 +44,15 @@ function showBanner(text) {
 
 function fmtAgo(seconds) {
   if (seconds == null) return '—';
-  if (seconds < 60) return `${Math.round(seconds)} 秒前`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
-  return `${(seconds / 3600).toFixed(1)} 小时前`;
+  if (seconds < 60) return t('ago.s', { n: Math.round(seconds) });
+  if (seconds < 3600) return t('ago.m', { n: Math.round(seconds / 60) });
+  return t('ago.h', { n: (seconds / 3600).toFixed(1) });
 }
 
 function fmtDuration(ms) {
   const minutes = Math.floor(ms / 60000);
-  if (minutes < 60) return `${minutes} 分钟`;
-  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+  if (minutes < 60) return t('duration.m', { m: minutes });
+  return t('duration.hm', { h: Math.floor(minutes / 60), m: minutes % 60 });
 }
 
 function fmtTime(iso) {
@@ -95,11 +62,11 @@ function fmtTime(iso) {
 }
 
 function linkState(live) {
-  if (!live) return ['未连接', 'off'];
+  if (!live) return [t('link.none'), 'off'];
   const s = live.display_state;
-  if (s === 'input' || s === 'ready') return ['已连接', 'on'];
-  if (s === 'idle') return live.last_seen_s < 10 ? ['连接中', 'wait'] : ['未连接（休眠或关机）', 'off'];
-  return ['连接中', 'wait'];
+  if (s === 'input' || s === 'ready') return [t('link.on'), 'on'];
+  if (s === 'idle') return live.last_seen_s < 10 ? [t('link.wait'), 'wait'] : [t('link.asleep'), 'off'];
+  return [t('link.wait'), 'wait'];
 }
 
 function labelNames() {
@@ -110,22 +77,26 @@ function labelNames() {
 
 // --- the receiver ----------------------------------------------------------------------------
 
+function renderBanner() {
+  showBanner(streamDown ? t('stream.down') : tx(state && state.message));
+}
+
 function renderReceiver(st) {
-  const [text, cls] = PHASES[st.phase] || [st.phase, 'wait'];
   const badge = $('#phase');
-  badge.textContent = text;
-  badge.className = `badge ${cls}`;
+  badge.textContent = PHASE_CLASSES[st.phase] ? t(`phase.${st.phase}`) : st.phase;
+  badge.className = `badge ${PHASE_CLASSES[st.phase] || 'wait'}`;
+  badge.removeAttribute('data-i18n'); // the phase decides from now on, not the static text
 
   const info = [];
   if (st.version) info.push(`v${st.version}`);
   if (st.phase === 'running' && st.started_at) {
     const started = new Date(st.started_at);
-    info.push(`${fmtTime(st.started_at)} 启动，已运行 ${fmtDuration(Date.now() - started.getTime())}`);
+    info.push(t('receiver.uptime', { time: fmtTime(st.started_at), duration: fmtDuration(Date.now() - started.getTime()) }));
   }
   $('#receiver-info').textContent = info.join(' · ');
   $('#btn-start').disabled = !(st.phase === 'stopped' || st.phase === 'failed');
   $('#btn-stop').disabled = st.phase !== 'running';
-  showBanner(streamDown ? '与控制台服务的连接断开了，正在重连…' : st.message);
+  renderBanner();
 }
 
 async function act(path, button) {
@@ -176,7 +147,7 @@ function setStick(dot, x, y) {
 function updateCard(card, c) {
   const { refs } = card;
   const live = c.live;
-  refs.name.textContent = c.name || '未登记的手柄';
+  refs.name.textContent = c.name || t('card.unregistered');
   refs.note.textContent = c.note || '';
   const [text, cls] = linkState(live);
   refs.link.textContent = text;
@@ -185,8 +156,8 @@ function updateCard(card, c) {
   refs.label.textContent = c.label || '—';
 
   const pad = live && live.gamepad;
-  if (pad && pad.error) refs.player.textContent = `出错：${pad.error}`;
-  else if (pad && pad.slot != null) refs.player.textContent = `玩家 ${pad.slot + 1}`;
+  if (pad && pad.error) refs.player.textContent = t('card.padError', { error: pad.error });
+  else if (pad && pad.slot != null) refs.player.textContent = t('card.playerN', { n: pad.slot + 1 });
   else refs.player.textContent = '—';
 
   const b = c.battery; // kept by the console: the controller's last report, or its level at connection
@@ -194,9 +165,9 @@ function updateCard(card, c) {
   refs.batteryFill.style.width = battery == null ? '0%' : `${battery}%`;
   refs.batteryFill.classList.toggle('low', battery != null && battery <= 20);
   refs.batteryText.textContent = battery == null ? '—' : `${battery}%`;
-  if (!b) refs.batteryWhen.textContent = live && cls === 'on' ? '读取中…' : '';
-  else if (b.source === 'connect') refs.batteryWhen.textContent = '连接时读取，之后没有变化';
-  else refs.batteryWhen.textContent = `上次变化：${fmtAgo((Date.now() - b.at_ms) / 1000)}`;
+  if (!b) refs.batteryWhen.textContent = live && cls === 'on' ? t('battery.reading') : '';
+  else if (b.source === 'connect') refs.batteryWhen.textContent = t('battery.atConnect');
+  else refs.batteryWhen.textContent = t('battery.changed', { ago: fmtAgo((Date.now() - b.at_ms) / 1000) });
   refs.seen.textContent = live ? fmtAgo(live.last_seen_s) : '—';
 
   const input = cls === 'on' && live ? live.input : null;
@@ -237,7 +208,7 @@ async function rumble(card) {
   const { refs } = card;
   card.busy = true;
   refs.button.disabled = true;
-  refs.message.textContent = '发送中…';
+  refs.message.textContent = t('rumble.sending');
   clearTimeout(card.messageTimer);
   try {
     const r = await post('/api/rumble', {
@@ -245,9 +216,9 @@ async function rumble(card) {
       strength: Number(refs.strength.value),
       ms: Number(refs.duration.value),
     });
-    refs.message.textContent = r.sent ? '已发送' : '没有发出';
+    refs.message.textContent = r.sent ? t('rumble.sent') : t('rumble.notSent');
   } catch (e) {
-    refs.message.textContent = `失败：${e.message}`;
+    refs.message.textContent = t('rumble.failed', { error: e.message });
   } finally {
     card.busy = false;
     refs.button.disabled = !card.connected;
@@ -257,11 +228,17 @@ async function rumble(card) {
 
 // --- events ----------------------------------------------------------------------------------
 
+// Events whose name sounds like a failure but that are a normal part of a connection.
+function isRoutine(ev) {
+  // GetControllerStateRequest re-sent before the controller handed its link to its app: it
+  // answers INTERNAL (13), stadiacast ignores that and asks again until it answers OK.
+  return ev.event === 'display_controller_state_error' && (ev.detail || {}).code === 13;
+}
+
 function detailText(ev) {
   const d = { ...(ev.detail || {}) };
-  if (ev.event === 'display_state' && d.display_state) {
-    return DISPLAY_STATES[d.display_state] || d.display_state;
-  }
+  if (ev.event === 'display_state' && d.display_state) return displayStateName(d.display_state);
+  if (isRoutine(ev)) return t('routine.stateDeferred');
   return Object.entries(d).map(([k, v]) => `${k}=${v}`).join('  ');
 }
 
@@ -271,24 +248,30 @@ function cell(text) {
   return td;
 }
 
-async function loadLogs() {
-  const res = await fetch('/api/logs');
-  if (!res.ok) return;
-  const doc = await res.json();
-  $('#log-path').textContent = doc.path || '还没有日志';
+function renderLogs() {
+  const doc = lastLogs;
+  if (!doc) return;
+  $('#log-path').textContent = doc.path || t('events.noLog');
   const names = labelNames();
   const rows = doc.events.slice().reverse().map((ev) => {
     const tr = document.createElement('tr');
-    if (/fail|error|exited|alert|unanswered|unattributed/.test(ev.event)) tr.className = 'bad';
+    if (/fail|error|exited|alert|unanswered|unattributed/.test(ev.event) && !isRoutine(ev)) tr.className = 'bad';
     tr.append(
       cell(fmtTime(ev.ts)),
       cell(ev.controller ? `${names[ev.controller] || ''} ${ev.controller}`.trim() : ''),
-      cell(EVENT_NAMES[ev.event] || ev.event),
+      cell(eventName(ev.event)),
       cell(detailText(ev)),
     );
     return tr;
   });
   $('#events tbody').replaceChildren(...rows);
+}
+
+async function loadLogs() {
+  const res = await fetch('/api/logs');
+  if (!res.ok) return;
+  lastLogs = await res.json();
+  renderLogs();
 }
 
 function scheduleLogs(delay) {
@@ -305,12 +288,17 @@ let maxControllers = 4;
 
 function addRow(c = { name: '', ip: '', note: '' }) {
   const tr = document.createElement('tr');
-  for (const [key, placeholder] of [['name', '名称'], ['ip', '192.168.1.x'], ['note', '备注（可选）']]) {
+  for (const [key, placeholderKey] of [['name', 'settings.name'], ['ip', null], ['note', 'settings.notePlaceholder']]) {
     const td = document.createElement('td');
     const input = document.createElement('input');
     input.name = key;
     input.value = c[key] || '';
-    input.placeholder = placeholder;
+    if (placeholderKey) {
+      input.dataset.i18nPlaceholder = placeholderKey;
+      input.placeholder = t(placeholderKey);
+    } else {
+      input.placeholder = '192.168.1.x';
+    }
     input.autocomplete = 'off';
     input.spellcheck = false;
     td.append(input);
@@ -320,7 +308,8 @@ function addRow(c = { name: '', ip: '', note: '' }) {
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'secondary';
-  remove.textContent = '删除';
+  remove.dataset.i18n = 'settings.remove';
+  remove.textContent = t('settings.remove');
   remove.addEventListener('click', () => { tr.remove(); updateAddButton(); });
   td.append(remove);
   tr.append(td);
@@ -349,17 +338,31 @@ async function saveConfig(event) {
     ip: tr.querySelector('[name=ip]').value,
     note: tr.querySelector('[name=note]').value,
   }));
-  msg.textContent = '保存中…';
+  msg.textContent = t('settings.saving');
   try {
     const r = await post('/api/config', {
       dns_upstream: $('#settings-form').elements.dns_upstream.value,
       controllers,
     });
-    msg.textContent = r.restart_needed ? '已保存。停止再启动 stadiacast 后生效。' : '已保存。';
+    msg.textContent = r.restart_needed ? t('settings.savedRestart') : t('settings.saved');
     await loadConfig();
   } catch (e) {
-    msg.textContent = `没有保存：${e.message}`;
+    msg.textContent = t('settings.notSaved', { error: e.message });
   }
+}
+
+// --- language --------------------------------------------------------------------------------
+
+function switchLang(next) {
+  setLang(next);
+  $('#settings-msg').textContent = '';
+  if (state) {
+    renderReceiver(state);
+    renderControllers(state.controllers);
+  } else {
+    renderBanner();
+  }
+  renderLogs();
 }
 
 // --- start -----------------------------------------------------------------------------------
@@ -378,11 +381,15 @@ function connect() {
   };
   source.onerror = () => {
     streamDown = true;
-    showBanner('与控制台服务的连接断开了，正在重连…');
+    renderBanner();
   };
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  setLang(lang);
+  for (const b of document.querySelectorAll('[data-lang]')) {
+    b.addEventListener('click', () => switchLang(b.dataset.lang));
+  }
   $('#btn-start').addEventListener('click', (e) => act('/api/start', e.currentTarget));
   $('#btn-stop').addEventListener('click', (e) => act('/api/stop', e.currentTarget));
   $('#btn-add').addEventListener('click', () => addRow());

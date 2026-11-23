@@ -57,6 +57,7 @@ STREAM_PING_S = 15.0
 
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
@@ -87,6 +88,7 @@ LOG_PROBLEM = re.compile(r"fail|error|exited|evict|unanswered|unattributed|alert
 EVENT_NAME = re.compile(rb'"event": "([a-z0-9_]+)"')
 DETAIL_KEYS = (
     "display_state",
+    "code",
     "ip",
     "serial",
     "product",
@@ -129,39 +131,47 @@ def battery_from_status(doc: Any, label: str) -> int | None:
     return round(level * 100)
 
 
-class ConsoleError(Exception):
-    """A request the console refuses: the HTTP status and a message for the page."""
+def text(zh: str, en: str) -> dict[str, str]:
+    """A message for the page in both of its languages; the page shows the one it is in."""
+    return {"zh": zh, "en": en}
 
-    def __init__(self, status: int, message: str) -> None:
-        super().__init__(message)
+
+class ConsoleError(Exception):
+    """A request the console refuses: the HTTP status and a message for the page, in both languages."""
+
+    def __init__(self, status: int, zh: str, en: str | None = None) -> None:
+        super().__init__(en or zh)
         self.status = status
+        self.text = text(zh, en or zh)
 
 
 # --- settings ------------------------------------------------------------------------------------
 
 
-def _text(value: Any, what: str, longest: int, *, required: bool) -> str:
+def _text(value: Any, what: tuple[str, str], longest: int, *, required: bool) -> str:
+    zh, en = what
     if value is None:
         value = ""
     if not isinstance(value, str):
-        raise ConsoleError(400, f"{what}必须是文字")
+        raise ConsoleError(400, f"{zh}必须是文字", f"{en} must be text")
     value = value.strip()
     if required and not value:
-        raise ConsoleError(400, f"{what}不能为空")
+        raise ConsoleError(400, f"{zh}不能为空", f"{en} cannot be empty")
     if len(value) > longest:
-        raise ConsoleError(400, f"{what}最多 {longest} 个字符")
+        raise ConsoleError(400, f"{zh}最多 {longest} 个字符", f"{en} has at most {longest} characters")
     if any(unicodedata.category(ch).startswith("C") for ch in value):
-        raise ConsoleError(400, f"{what}含有不可见字符")
+        raise ConsoleError(400, f"{zh}含有不可见字符", f"{en} contains invisible characters")
     return value
 
 
-def _ipv4(value: Any, what: str, *, private: bool = False) -> str:
+def _ipv4(value: Any, what: tuple[str, str], *, private: bool = False) -> str:
+    zh, en = what
     try:
         addr = ipaddress.IPv4Address(str(value).strip())
     except ValueError:
-        raise ConsoleError(400, f"{what}：{value} 不是有效的 IPv4 地址") from None
+        raise ConsoleError(400, f"{zh}：{value} 不是有效的 IPv4 地址", f"{en}: {value} is not a valid IPv4 address") from None
     if private and not addr.is_private:
-        raise ConsoleError(400, f"{what}：{addr} 不是局域网地址")
+        raise ConsoleError(400, f"{zh}：{addr} 不是局域网地址", f"{en}: {addr} is not a LAN address")
     return str(addr)
 
 
@@ -173,37 +183,37 @@ def work_path(cfg: dict[str, Any]) -> Path:
 def validate_config(raw: Any) -> dict[str, Any]:
     """The settings, checked: the work folder, the upstream DNS, and 1 to 4 controllers."""
     if not isinstance(raw, dict):
-        raise ConsoleError(400, "配置格式不对")
+        raise ConsoleError(400, "配置格式不对", "The settings are malformed")
     folder = raw.get("work_dir")
     if not isinstance(folder, str) or not folder.strip():
-        raise ConsoleError(400, "work_dir 必须是一个文件夹路径")
+        raise ConsoleError(400, "work_dir 必须是一个文件夹路径", "work_dir must be a folder path")
     folder = folder.strip()
     try:
         (PROJECT_DIR / folder).resolve().mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise ConsoleError(400, f"无法创建工作目录 {folder}：{e}") from None
+        raise ConsoleError(400, f"无法创建工作目录 {folder}：{e}", f"Cannot create the work folder {folder}: {e}") from None
     controllers = raw.get("controllers")
     if not isinstance(controllers, list) or not 1 <= len(controllers) <= MAX_CONTROLLERS:
-        raise ConsoleError(400, f"手柄数量应为 1 到 {MAX_CONTROLLERS} 只")
+        raise ConsoleError(400, f"手柄数量应为 1 到 {MAX_CONTROLLERS} 只", f"Give 1 to {MAX_CONTROLLERS} controllers")
     checked: list[dict[str, str]] = []
     names: set[str] = set()
     ips: set[str] = set()
     for i, c in enumerate(controllers, 1):
         if not isinstance(c, dict):
-            raise ConsoleError(400, f"第 {i} 只手柄的格式不对")
-        name = _text(c.get("name"), f"第 {i} 只手柄的名称", 20, required=True)
-        ip = _ipv4(c.get("ip"), f"手柄 {name} 的 IP", private=True)
-        note = _text(c.get("note"), f"手柄 {name} 的备注", 40, required=False)
+            raise ConsoleError(400, f"第 {i} 只手柄的格式不对", f"Controller {i} is malformed")
+        name = _text(c.get("name"), (f"第 {i} 只手柄的名称", f"The name of controller {i}"), 20, required=True)
+        ip = _ipv4(c.get("ip"), (f"手柄 {name} 的 IP", f"The IP of controller {name}"), private=True)
+        note = _text(c.get("note"), (f"手柄 {name} 的备注", f"The note of controller {name}"), 40, required=False)
         if name.casefold() in names:
-            raise ConsoleError(400, f"手柄名称重复：{name}")
+            raise ConsoleError(400, f"手柄名称重复：{name}", f"Two controllers are named {name}")
         if ip in ips:
-            raise ConsoleError(400, f"手柄 IP 重复：{ip}")
+            raise ConsoleError(400, f"手柄 IP 重复：{ip}", f"Two controllers have the IP {ip}")
         names.add(name.casefold())
         ips.add(ip)
         checked.append({"name": name, "ip": ip, "note": note})
     return {
         "work_dir": folder,
-        "dns_upstream": _ipv4(raw.get("dns_upstream"), "上游 DNS"),
+        "dns_upstream": _ipv4(raw.get("dns_upstream"), ("上游 DNS", "The upstream DNS")),
         "controllers": checked,
     }
 
@@ -285,7 +295,7 @@ class ReceiverApi:
         try:
             return self._call(self.port, method, path, body, timeout)
         except (OSError, http.client.HTTPException) as e:
-            raise ConsoleError(502, f"连不上 stadiacast：{e}") from None
+            raise ConsoleError(502, f"连不上 stadiacast：{e}", f"Cannot reach stadiacast: {e}") from None
 
 
 # --- the receiver's event log -------------------------------------------------------------------
@@ -369,7 +379,7 @@ class Console:
         self.seq = 0
         self.cfg = load_config()
         self.phase = "unknown"  # unknown | stopped | starting | running | stopping | failed
-        self.message: str | None = None
+        self.message: dict[str, str] | None = None  # text(zh, en)
         self.reachable = False
         self.status: dict[str, Any] | None = None  # version and log_dir of the running receiver
         self.live: dict[str, Any] | None = None  # the latest /_input document
@@ -409,7 +419,11 @@ class Console:
                 code = self.proc.poll() if self.proc is not None else None
                 if self.phase == "running" and code not in (None, 0):
                     self.phase = "failed"
-                    self.message = f"stadiacast 意外退出（退出码 {code}）：{self._err_tail()}"
+                    tail = self._err_tail()
+                    self.message = text(
+                        f"stadiacast 意外退出（退出码 {code}）：{tail or '没有错误输出'}",
+                        f"stadiacast exited unexpectedly (exit code {code}): {tail or 'no error output'}",
+                    )
                 else:
                     self.phase = "stopped"
             if (self.phase, self.reachable) != before:
@@ -528,25 +542,30 @@ class Console:
         runs = sorted((base / "captures").glob("*/server.jsonl"))  # stamped names sort by time
         return runs[-1] if runs else None
 
-    def _err_tail(self) -> str:
+    def _err_tail(self) -> str | None:
+        """The last lines stadiacast wrote to its error output, or None when it wrote nothing."""
         if self.err_path is None:
-            return "没有错误输出"
+            return None
         try:
-            text = self.err_path.read_bytes()[-4000:].decode("utf-8", "replace").strip()
+            out = self.err_path.read_bytes()[-4000:].decode("utf-8", "replace").strip()
         except OSError:
-            return "没有错误输出"
-        lines = [ln for ln in text.splitlines() if ln.strip()]
-        return " / ".join(lines[-3:]) if lines else "没有错误输出"
+            return None
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        return " / ".join(lines[-3:]) if lines else None
 
     # Actions from the page.
 
     def start(self) -> None:
         with self.cond:
             if self.phase in ("running", "starting", "stopping"):
-                raise ConsoleError(409, "stadiacast 已经在运行，或正在启动、停止")
+                raise ConsoleError(409, "stadiacast 已经在运行，或正在启动、停止", "stadiacast is already running, starting or stopping")
             exe = find_receiver()
             if exe is None:
-                raise ConsoleError(500, "找不到 stadiacast 命令，先按 docs\\guide.md 第 1 步安装")
+                raise ConsoleError(
+                    500,
+                    "找不到 stadiacast 命令，先按 docs\\guide.md 第 1 步安装",
+                    "The stadiacast command was not found: install it first (README.en.md, step 1)",
+                )
             CONSOLE_LOG_DIR.mkdir(parents=True, exist_ok=True)
             stamp = time.strftime("%Y%m%d-%H%M%S")
             out_path = CONSOLE_LOG_DIR / f"console-{stamp}.out"
@@ -576,20 +595,28 @@ class Console:
                 code = proc.poll()
                 if code is not None:
                     self.phase = "failed"
-                    self.message = f"stadiacast 没能启动（退出码 {code}）：{self._err_tail()}"
+                    tail = self._err_tail()
+                    self.message = text(
+                        f"stadiacast 没能启动（退出码 {code}）：{tail or '没有错误输出'}",
+                        f"stadiacast did not start (exit code {code}): {tail or 'no error output'}",
+                    )
                     self.changed()
                     return
             time.sleep(0.3)
         with self.cond:
             if self.phase == "starting" and self.proc is proc:
                 self.phase = "failed"
-                self.message = f"stadiacast 在 {START_TIMEOUT_S:.0f} 秒内没有启动完成：{self._err_tail()}"
+                tail = self._err_tail()
+                self.message = text(
+                    f"stadiacast 在 {START_TIMEOUT_S:.0f} 秒内没有启动完成：{tail or '没有错误输出'}",
+                    f"stadiacast was not up within {START_TIMEOUT_S:.0f} s: {tail or 'no error output'}",
+                )
                 self.changed()
 
     def stop(self) -> None:
         with self.cond:
             if self.phase != "running":
-                raise ConsoleError(409, "stadiacast 没有在运行")
+                raise ConsoleError(409, "stadiacast 没有在运行", "stadiacast is not running")
             self.phase, self.message = "stopping", None
             self.changed()
         try:
@@ -608,29 +635,35 @@ class Console:
         with self.cond:
             if self.phase == "stopping":
                 self.phase = "running" if self.reachable else "stopped"
-                self.message = f"停止请求发出后 {STOP_TIMEOUT_S:.0f} 秒，stadiacast 还没有退出"
+                self.message = text(
+                    f"停止请求发出后 {STOP_TIMEOUT_S:.0f} 秒，stadiacast 还没有退出",
+                    f"stadiacast has not exited {STOP_TIMEOUT_S:.0f} s after it was asked to stop",
+                )
                 self.changed()
 
     def rumble(self, body: dict[str, Any]) -> dict[str, Any]:
-        ip = _ipv4(body.get("ip"), "手柄 IP")
+        ip = _ipv4(body.get("ip"), ("手柄 IP", "The controller IP"))
         strength, ms = body.get("strength"), body.get("ms")
         if not isinstance(strength, int) or isinstance(strength, bool) or not 0 <= strength <= 65535:
-            raise ConsoleError(400, "强度应为 0 到 65535 的整数")
+            raise ConsoleError(400, "强度应为 0 到 65535 的整数", "The strength is a whole number from 0 to 65535")
         if not isinstance(ms, int) or isinstance(ms, bool) or not 1 <= ms <= 10000:
-            raise ConsoleError(400, "时长应为 1 到 10000 毫秒的整数")
+            raise ConsoleError(400, "时长应为 1 到 10000 毫秒的整数", "The length is a whole number of ms from 1 to 10000")
         with self.cond:
             known = {c["ip"] for c in self.cfg["controllers"]}
             known |= {c.get("ip") for c in ((self.live or {}).get("controllers") or {}).values()}
             if self.phase != "running":
-                raise ConsoleError(409, "stadiacast 没有在运行")
+                raise ConsoleError(409, "stadiacast 没有在运行", "stadiacast is not running")
         if ip not in known:
-            raise ConsoleError(400, f"不认识这只手柄：{ip}")
+            raise ConsoleError(400, f"不认识这只手柄：{ip}", f"Unknown controller: {ip}")
         status, doc = self.api.request(
             "POST", f"/_rumble?controller={urllib.parse.quote(ip)}", {"left": strength, "right": strength, "ms": ms}
         )
         if status != 200 or not isinstance(doc, dict):
-            message = doc.get("error") if isinstance(doc, dict) else None
-            raise ConsoleError(status if 400 <= status < 600 else 502, message or f"stadiacast 返回 {status}")
+            message = doc.get("error") if isinstance(doc, dict) else None  # stadiacast's own, in English
+            code = status if 400 <= status < 600 else 502
+            if isinstance(message, str) and message:
+                raise ConsoleError(code, message, message)
+            raise ConsoleError(code, f"stadiacast 返回 {status}", f"stadiacast answered {status}")
         return {"sent": bool(doc.get("sent"))}
 
     def get_config(self) -> dict[str, Any]:
@@ -666,7 +699,7 @@ class Console:
                 cards.append({**c, "label": label, "live": state, "battery": battery(label)})
             for ip, (label, state) in by_ip.items():
                 cards.append(
-                    {"name": None, "ip": ip, "note": "未登记", "label": label, "live": state, "battery": battery(label)}
+                    {"name": None, "ip": ip, "note": "", "label": label, "live": state, "battery": battery(label)}
                 )
             log_dir = (self.status or {}).get("log_dir") if self.reachable else None
             started_at = None
@@ -721,32 +754,32 @@ class Handler(BaseHTTPRequestHandler):
         # A page on another site reaching this server through a name that resolves to
         # 127.0.0.1 (DNS rebinding) still sends that name as Host.
         if self.headers.get("Host", "") not in self.allowed_hosts:
-            raise ConsoleError(403, "只接受通过 127.0.0.1 或 localhost 访问")
+            raise ConsoleError(403, "只接受通过 127.0.0.1 或 localhost 访问", "Only reachable as 127.0.0.1 or localhost")
 
     def _check_post(self) -> None:
         origin = self.headers.get("Origin")
         if origin is not None and origin not in {f"http://{h}" for h in self.allowed_hosts}:
-            raise ConsoleError(403, "不接受来自其他网页的请求")
+            raise ConsoleError(403, "不接受来自其他网页的请求", "Requests from other pages are refused")
         # A custom header makes a cross-site request need a CORS preflight, which is never granted.
         if self.headers.get("X-Stadia-Console") != "1":
-            raise ConsoleError(403, "缺少 X-Stadia-Console 请求头")
+            raise ConsoleError(403, "缺少 X-Stadia-Console 请求头", "The X-Stadia-Console header is missing")
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
-            raise ConsoleError(415, "请求体必须是 JSON")
+            raise ConsoleError(415, "请求体必须是 JSON", "The body must be JSON")
 
     def _read_json(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            raise ConsoleError(400, "Content-Length 不对") from None
+            raise ConsoleError(400, "Content-Length 不对", "Bad Content-Length") from None
         if not 0 <= length <= MAX_BODY:
-            raise ConsoleError(413, "请求体太大")
+            raise ConsoleError(413, "请求体太大", "The body is too large")
         raw = self.rfile.read(length) if length else b"{}"
         try:
             doc = json.loads(raw or b"{}")
         except ValueError:
-            raise ConsoleError(400, "请求体不是有效的 JSON") from None
+            raise ConsoleError(400, "请求体不是有效的 JSON", "The body is not valid JSON") from None
         if not isinstance(doc, dict):
-            raise ConsoleError(400, "请求体必须是 JSON 对象")
+            raise ConsoleError(400, "请求体必须是 JSON 对象", "The body must be a JSON object")
         return doc
 
     def _static(self, path: str) -> None:
@@ -799,13 +832,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.console.logs())
             if path == "/api/config":
                 return self._json(200, self.console.get_config())
-            raise ConsoleError(404, "没有这个地址")
+            raise ConsoleError(404, "没有这个地址", "No such address")
         except ConsoleError as e:
-            self._json(e.status, {"error": str(e)})
+            self._json(e.status, {"error": e.text})
         except OSError:
             pass
         except Exception as e:  # noqa: BLE001 - the page gets the message, the server goes on
-            self._json(500, {"error": f"{type(e).__name__}: {e}"})
+            self._json(500, {"error": text(f"{type(e).__name__}: {e}", f"{type(e).__name__}: {e}")})
 
     def do_POST(self) -> None:  # noqa: N802 - the base class's name
         try:
@@ -827,13 +860,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return None
-            raise ConsoleError(404, "没有这个地址")
+            raise ConsoleError(404, "没有这个地址", "No such address")
         except ConsoleError as e:
-            self._json(e.status, {"error": str(e)})
+            self._json(e.status, {"error": e.text})
         except OSError:
             pass
         except Exception as e:  # noqa: BLE001
-            self._json(500, {"error": f"{type(e).__name__}: {e}"})
+            self._json(500, {"error": text(f"{type(e).__name__}: {e}", f"{type(e).__name__}: {e}")})
 
 
 def main() -> None:

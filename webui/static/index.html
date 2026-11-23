@@ -3,59 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stadia 手柄控制台</title>
+  <title>Stadia Controller Console</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <h1>Stadia 手柄控制台</h1>
+    <h1 data-i18n="title">Stadia Controller Console</h1>
     <div class="receiver">
-      <span id="phase" class="badge wait">检测中…</span>
+      <span id="phase" class="badge wait" data-i18n="phase.unknown">Checking…</span>
       <span id="receiver-info" class="muted"></span>
-      <button id="btn-start" type="button" disabled>启动 stadiacast</button>
-      <button id="btn-stop" type="button" class="secondary" disabled>停止</button>
+      <button id="btn-start" type="button" disabled data-i18n="btn.start">Start stadiacast</button>
+      <button id="btn-stop" type="button" class="secondary" disabled data-i18n="btn.stop">Stop</button>
+      <div class="lang" role="group" aria-label="Language / 语言">
+        <button type="button" class="lang-btn" data-lang="zh" lang="zh-CN" aria-pressed="false">中文</button>
+        <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">English</button>
+      </div>
     </div>
   </header>
 
   <div id="banner" class="banner" hidden></div>
 
   <main>
-    <p class="hint muted">启动后先唤醒第一只手柄，等它的灯常亮再唤醒下一只，玩家编号就按这个顺序排。</p>
+    <p class="hint muted" data-i18n="hint"></p>
 
-    <section id="controllers" class="grid" aria-label="手柄"></section>
+    <section id="controllers" class="grid" data-i18n-aria="controllers.label"></section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>最近事件</h2>
+        <h2 data-i18n="events.title"></h2>
         <span id="log-path" class="muted small"></span>
       </div>
       <div class="table-wrap">
         <table id="events">
-          <thead><tr><th>时间</th><th>手柄</th><th>事件</th><th>详情</th></tr></thead>
+          <thead><tr>
+            <th data-i18n="events.time"></th><th data-i18n="events.controller"></th>
+            <th data-i18n="events.event"></th><th data-i18n="events.detail"></th>
+          </tr></thead>
           <tbody></tbody>
         </table>
       </div>
     </section>
 
     <details class="panel" id="settings">
-      <summary><h2>设置</h2></summary>
+      <summary><h2 data-i18n="settings.title"></h2></summary>
       <form id="settings-form" novalidate>
-        <label class="field">上游 DNS
+        <label class="field"><span data-i18n="settings.dns"></span>
           <input name="dns_upstream" autocomplete="off" spellcheck="false">
         </label>
         <table class="ctl-table">
-          <thead><tr><th>名称</th><th>IP</th><th>备注</th><th></th></tr></thead>
+          <thead><tr>
+            <th data-i18n="settings.name"></th><th data-i18n="settings.ip"></th><th data-i18n="settings.note"></th><th></th>
+          </tr></thead>
           <tbody id="ctl-rows"></tbody>
         </table>
         <div class="row">
-          <button type="button" id="btn-add" class="secondary">添加手柄</button>
-          <button type="submit">保存</button>
+          <button type="button" id="btn-add" class="secondary" data-i18n="settings.add"></button>
+          <button type="submit" data-i18n="settings.save"></button>
           <span id="settings-msg" class="muted"></span>
         </div>
         <p class="muted small">
-          设置在下次启动 stadiacast 时生效。第一只手柄的 IP 也用来确定朝向手柄的网卡。
-          修改手柄 IP 后，还要同步修改路由器的静态地址和 DNS 标签（scripts\router-dhcp-tag.sh），并重新运行 scripts\firewall.ps1（它从这份设置里读取手柄 IP）。
+          <span data-i18n="settings.help1"></span>
+          <span data-i18n="settings.help2"></span>
         </p>
       </form>
     </details>
@@ -69,11 +79,11 @@
         <span class="badge link"></span>
       </header>
       <dl class="facts">
-        <div><dt>IP</dt><dd class="ip"></dd></div>
-        <div><dt>编号</dt><dd class="label"></dd></div>
-        <div><dt>玩家</dt><dd class="player"></dd></div>
-        <div><dt>电量</dt><dd><span class="battery"><span class="battery-fill"></span></span> <span class="battery-text"></span><span class="battery-when muted small"></span></dd></div>
-        <div><dt>最后通信</dt><dd class="seen"></dd></div>
+        <div><dt data-i18n="card.ip"></dt><dd class="ip"></dd></div>
+        <div><dt data-i18n="card.label"></dt><dd class="label"></dd></div>
+        <div><dt data-i18n="card.player"></dt><dd class="player"></dd></div>
+        <div><dt data-i18n="card.battery"></dt><dd><span class="battery"><span class="battery-fill"></span></span> <span class="battery-text"></span><span class="battery-when muted small"></span></dd></div>
+        <div><dt data-i18n="card.seen"></dt><dd class="seen"></dd></div>
       </dl>
       <div class="pad">
         <div class="shoulders">
@@ -84,18 +94,18 @@
         </div>
         <div class="pad-body">
           <div class="dpad">
-            <span class="chip up" data-btn="dpad_up">上</span>
-            <span class="chip left" data-btn="dpad_left">左</span>
-            <span class="chip right" data-btn="dpad_right">右</span>
-            <span class="chip down" data-btn="dpad_down">下</span>
+            <span class="chip up" data-btn="dpad_up" data-i18n="btn.up"></span>
+            <span class="chip left" data-btn="dpad_left" data-i18n="btn.left"></span>
+            <span class="chip right" data-btn="dpad_right" data-i18n="btn.right"></span>
+            <span class="chip down" data-btn="dpad_down" data-i18n="btn.down"></span>
           </div>
           <div class="stick" data-btn="l3"><span class="dot ls"></span></div>
           <div class="middle">
-            <span class="chip small" data-btn="options" title="选项键">⋯</span>
-            <span class="chip small" data-btn="menu" title="菜单键">≡</span>
-            <span class="chip small" data-btn="assistant" title="Google Assistant 键">助理</span>
-            <span class="chip small" data-btn="capture" title="截图键">截图</span>
-            <span class="chip wide" data-btn="stadia" title="Stadia 键">Stadia</span>
+            <span class="chip small" data-btn="options" data-i18n-title="btn.optionsTitle">⋯</span>
+            <span class="chip small" data-btn="menu" data-i18n-title="btn.menuTitle">≡</span>
+            <span class="chip small" data-btn="assistant" data-i18n="btn.assistant" data-i18n-title="btn.assistantTitle"></span>
+            <span class="chip small" data-btn="capture" data-i18n="btn.capture" data-i18n-title="btn.captureTitle"></span>
+            <span class="chip wide" data-btn="stadia" data-i18n-title="btn.stadiaTitle">Stadia</span>
           </div>
           <div class="stick" data-btn="r3"><span class="dot rs"></span></div>
           <div class="face">
@@ -107,13 +117,13 @@
         </div>
       </div>
       <div class="rumble">
-        <label>震动强度 <input type="range" class="strength" min="5000" max="65535" step="1000" value="40000"></label>
-        <select class="duration" aria-label="震动时长">
-          <option value="300">0.3 秒</option>
-          <option value="1000" selected>1 秒</option>
-          <option value="2000">2 秒</option>
+        <label><span data-i18n="rumble.strength"></span> <input type="range" class="strength" min="5000" max="65535" step="1000" value="40000"></label>
+        <select class="duration" data-i18n-aria="rumble.duration">
+          <option value="300" data-i18n="rumble.s03"></option>
+          <option value="1000" selected data-i18n="rumble.s1"></option>
+          <option value="2000" data-i18n="rumble.s2"></option>
         </select>
-        <button type="button" class="btn-rumble">震动</button>
+        <button type="button" class="btn-rumble" data-i18n="rumble.button"></button>
         <span class="rumble-msg muted small"></span>
       </div>
     </article>

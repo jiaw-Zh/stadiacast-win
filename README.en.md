@@ -8,7 +8,7 @@ What is here:
 
 - **The steps**, from finding out which firmware a controller runs to playing, with the traps marked. stadiacast's own docs centre on a macOS hotspot; this covers Windows with an OpenWrt router.
 - **The pitfalls** we hit and how each was solved.
-- **A small local web console** (`webui\`): start and stop stadiacast, see each controller live (link, battery, player, buttons and sticks), send a test rumble.
+- **A small local web console** (`webui\`), in English or Chinese: start and stop stadiacast, see each controller live (link, battery, player, buttons and sticks), send a test rumble. Switch the language at the top right, or open http://127.0.0.1:8090/?lang=en .
 
 The detailed docs under `docs\` are in Chinese. This page carries the steps and the tips in short.
 
@@ -111,6 +111,11 @@ stadiacast --preset live --no-sntp --dns-upstream <router> --controller-ip <firs
   - Allowed in the prompt, they open every port to every source.
   - `firewall.ps1 -RemoveAutoRules` replaces them with rules for the controllers' IPs.
 - **`VIGEM_ERROR_BUS_NOT_FOUND` while the ViGEmBus service runs** is a broken old install: a service but no bus device. Reinstalling 1.22.0 fixes it.
+- **`display_controller_state_error` with `code` 13 at connection is normal.**
+  - stadiacast asks for the controller's state every 1.5 s after DTLS until it gets an OK.
+  - The controller answers only once its discovery has handed the link to its app. Asks that come before that are answered INTERNAL (13); stadiacast ignores those and asks again.
+  - If `display_state ready` and `controller_hardware` follow, nothing is wrong. The console shows it as routine, not as an error.
+  - A real problem is no READY at all, which ends in `display_rpc_unanswered` after 5 minutes.
 - **`curl.exe -d '{"left":40000}'` fails in PowerShell** with `Expecting property name enclosed in double quotes`. PowerShell strips the inner quotes when it calls a native program. Use `Invoke-RestMethod -Method Post -ContentType 'application/json' -Body '{...}'`, or the scripts here.
 - **A browser page cannot drive stadiacast's control endpoints directly**: stadiacast refuses non-GET requests that carry an `Origin` header. Hence the small local server behind the console.
 - **Address a controller by IP**, e.g. `/_rumble?controller=192.168.1.201`. The `c0`, `c1` labels follow the order of waking.
@@ -130,7 +135,7 @@ stadiacast --preset live --no-sntp --dns-upstream <router> --controller-ip <firs
 | `docs\battery.md` | the battery field (Chinese) |
 | `docs\background.md` | how stadiacast works, and how it compares with StadiaWireless (Chinese) |
 | `stadia-console.cmd` | opens the web console |
-| `webui\` | the console: `server.py` (Python standard library only) and the page |
+| `webui\` | the console: `server.py` (Python standard library only) and the page; its texts are in `webui\static\i18n.js` |
 | `scripts\` | start/stop, status, rumble, firewall, router commands, firmware detection |
 
 ## Tested with
